@@ -4,6 +4,8 @@
 
 pcap_microbust is a simple **packet analyzer** tool used to extract microbust information from PCAP 
 
+NOTE: Expected capture port is hardware capture running at 10Gbit. Software timestamps create too much variability to effectively calculate microburst activity. 
+
 
 **Algo**
 

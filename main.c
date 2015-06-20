@@ -234,12 +234,14 @@ int main(int argc, char* argv[])
 				double Threshold = atof(argv[i+1]);
 				fprintf(stderr, "Set burst minimum threshold %f Gbps\n", Threshold);
 				s_BurstThreshold = Threshold * 1e9;
+				i++;
 			}
 			else if (strcmp(argv[i], "--timebin") == 0)
 			{
 				double TimeBin = atof(argv[i+1]);
 				fprintf(stderr, "Bandwidth time bin to be %f ns\n", TimeBin);
 				s_TimeBinNS = TimeBin;
+				i++;
 			}
 			else
 			{
