@@ -4,7 +4,7 @@
 //
 // The MIT License (MIT) see LICENSE file for details 
 //
-// pcap latency diff  
+// pcap microburst analysis 
 //
 //---------------------------------------------------------------------------------------------
 
@@ -381,7 +381,7 @@ int main(int argc, char* argv[])
 					double BpsMean = WindowBurstBpsSum1	 / WindowBurstBpsSum0;
 					s64 dByte = WindowBurstBytes; 
 
-					printf("%s : Burst [Peek %10.3fGbps Mean: %10.3fGbps] Duration: %10.6f ms PacketCnt: %12lli Bytes:%8lliKB\n", 
+					printf("%s : Burst [Peek %10.3fGbps Mean: %10.3fGbps] Duration: %12.6f ms PacketCnt: %12lli Bytes:%8lliKB\n", 
 							FormatTS(WindowBurstStartTS), 
 							WindowBurstBpsMax/1e9, 
 							BpsMean/1e9, 
