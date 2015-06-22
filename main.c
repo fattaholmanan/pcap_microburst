@@ -57,13 +57,14 @@ typedef struct
 //---------------------------------------------------------------------------------------------
 // tunables
 
-static u64		s_TimeZoneOffset	= 0;			// local machines timezone offset
-static u64		s_TimeBinNS			= 100e3;		// microburst time slot
-static double	s_BurstThreshold	= 1e9;
-static double	s_BurstDuration		= 0;			// length in time of burst rate
+static u64		s_TimeZoneOffset		= 0;			// local machines timezone offset
+static u64		s_TimeBinNS				= 100e3;		// microburst time slot
+static double	s_BurstThreshold		= 1e9;
+static double	s_BurstDuration			= 0;			// length in time of burst rate
+static u64		s_BurstPktCntThreshold	= 128;			// minium number of packets to count as a burst
 
-static bool		s_PCAPStdin			= false;		// read pcap from stdin
-static bool		s_EnableStatus		= false;		// print regular status interval updates
+static bool		s_PCAPStdin				= false;		// read pcap from stdin
+static bool		s_EnableStatus			= false;		// print regular status interval updates
 
 //---------------------------------------------------------------------------------------------
 // mmaps a pcap file in full
@@ -354,17 +355,17 @@ int main(int argc, char* argv[])
 
 		if (!WindowInBurst)
 		{
-			if (Bps > s_BurstThreshold)
+			if ((Bps > s_BurstThreshold) && (WindowPktCnt > s_BurstPktCntThreshold))
 			{
 				WindowInBurst 		= true;
-				WindowBurstStartTS 	= PP->TS;
+				WindowBurstStartTS 	= PG->TS;
 				WindowBurstBpsMax	= Bps;
 
 				WindowBurstBpsSum0	= 1;
 				WindowBurstBpsSum1	= Bps;
 				WindowBurstBpsSum2	= Bps*Bps;
 
-				WindowBurstBytes	= PP->Length;	
+				WindowBurstBytes	= WindowByteCnt; 
 
 				//printf("%s : BurstStart %.3f\n", FormatTS(PP->TS), Bps/1e9);
 			}
@@ -383,12 +384,15 @@ int main(int argc, char* argv[])
 					double BpsMean = WindowBurstBpsSum1	 / WindowBurstBpsSum0;
 					s64 dByte = WindowBurstBytes; 
 
-					printf("%s : Burst [Peek %10.3fGbps Mean: %10.3fGbps] Duration: %12.6f ms PacketCnt: %12lli Bytes:%8lliKB\n", 
+					double PacketSizeMean = WindowBurstBytes  / WindowBurstBpsSum0;	
+
+					printf("%s : Burst [Peek %10.3fGbps Mean: %10.3fGbps] Duration: %12.6f ms PacketCnt: %12lli MeanPktLen: %4.f B TotalBurstLen:%8lli KB \n", 
 							FormatTS(WindowBurstStartTS), 
 							WindowBurstBpsMax/1e9, 
 							BpsMean/1e9, 
 							dT / 1e6,
 							WindowBurstBpsSum0,
+							PacketSizeMean,
 							WindowBurstBytes / 1024
 						);
 				}
