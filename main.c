@@ -18,6 +18,7 @@
 #include <sys/mman.h>
 #include <sys/shm.h>
 #include <fcntl.h>
+#include <inttypes.h>
 
 #include "fTypes.h"
 
@@ -58,10 +59,10 @@ typedef struct
 // tunables
 
 static u64		s_TimeZoneOffset		= 0;			// local machines timezone offset
-static u64		s_TimeBinNS				= 100e3;		// microburst time slot
+static u64		s_TimeBinNS				= 1e3;		// microburst time slot
 static double	s_BurstThreshold		= 1e9;
 static double	s_BurstDuration			= 0;			// length in time of burst rate
-static u64		s_BurstPktCntThreshold	= 128;			// minium number of packets to count as a burst
+static u64		s_BurstPktCntThreshold	= 12;			// minium number of packets to count as a burst
 
 static bool		s_PCAPStdin				= false;		// read pcap from stdin
 static bool		s_EnableStatus			= false;		// print regular status interval updates
@@ -156,7 +157,7 @@ static fEther_t * PCAPETHHeader(PCAPPacket_t* Pkt)
 
 static IP4Header_t* PCAPIP4Header(PCAPPacket_t* Pkt)
 {
-	fEther_t* E = (fEther_t*)(Pkt+1);	
+	fP2P_t* E = (fP2P_t*)(Pkt+1);	
 
 	IP4Header_t* IP4 = (IP4Header_t*)(E + 1);
 	u32 IPOffset = (IP4->Version & 0x0f)*4; 
@@ -295,129 +296,34 @@ int main(int argc, char* argv[])
 
 	// get starting time 
 	u64 PktCnt = 0;
+	u64 lastTS = 0;
+	u32 burstCnt = 0;
+	u32 pktInBurst = 0;
+	u64 lastBurstTS = 0;
 	while (!feof(PCAPFile->F))
 	{
 		PCAPPacket_t* Pkt = ReadPCAP(PCAPFile); 
 		if (!Pkt) break;
 
+		IP4Header_t* ipPkt = PCAPIP4Header(Pkt);
+		if(ipPkt->Src.IP[1] != 2)
+			continue;
+			// printf("ip src: %d %u.%u.%u.%u \n", ipPkt->Dst.IP4, ipPkt->Dst.IP[3], ipPkt->Dst.IP[2], ipPkt->Dst.IP[1], ipPkt->Dst.IP[0]);
+
 		u64 TS = PCAPTimeStamp(PCAPFile, Pkt);
+		if(lastTS == 0) lastTS = TS;
 
-		PacketSummary_t* PP = &PacketRing [ PacketRingPut ];
-
-		PP->TS 		= TS;
-		PP->Length 	= Pkt->LengthCapture;
-		PP->PktNo	= PktCnt;
-
-		// increate window stats
-
-		WindowPktCnt++;
-		WindowByteCnt += PP->Length;
-
-		PacketRingPut = (PacketRingPut + 1) % PacketRingMax;
-
-		// update tail ptr 
-		while (true)
-		{
-			PacketSummary_t* PG = &PacketRing [ PacketRingGet ];
-
-			s64 dTS = TS - PG->TS; 
-			if (dTS < s_TimeBinNS)
-			{
-				// window not changed
-				break;
-			}
-
-			// remove tail item from stats
-
-			WindowPktCnt--;	
-			WindowByteCnt -= PG->Length;
-
-			// remove tail item
-
-			PacketRingGet = (PacketRingGet + 1) % PacketRingMax; 
-			if (PacketRingGet  == PacketRingPut)
-			{
-				break;
-			}
+		if(TS - lastTS > 20000){
+			burstCnt++;
+			if(pktInBurst > 0)
+				printf("Burst[%d]: %d %"PRIu64"us \n", burstCnt, pktInBurst, (lastTS - lastBurstTS)/1000);
+			pktInBurst = 1;
+			lastBurstTS = TS;
+		} else {
+			pktInBurst++;
 		}
+		lastTS = TS;
 
-		// get new last packet in the window
-
-		PacketSummary_t* PG = &PacketRing [ PacketRingGet ];
-
-		// calcuate burst rate
-		double dT = (PP->TS - PG->TS);
-
-		// need to include time to receive the head packet 
-		dT += PP->Length * (1e9 / 10e9) * 8.0; 
-
-		double Bps = (8.0 * WindowByteCnt) * inverse(dT/ 1e9);	
-
-		if (!WindowInBurst)
-		{
-			if ((Bps > s_BurstThreshold) && (WindowPktCnt > s_BurstPktCntThreshold))
-			{
-				WindowInBurst 		= true;
-				WindowBurstStartTS 	= PG->TS;
-				WindowBurstBpsMax	= Bps;
-
-				WindowBurstBpsSum0	= 1;
-				WindowBurstBpsSum1	= Bps;
-				WindowBurstBpsSum2	= Bps*Bps;
-
-				WindowBurstBytes	= WindowByteCnt; 
-
-				//printf("%s : BurstStart %.3f\n", FormatTS(PP->TS), Bps/1e9);
-			}
-		}
-		else
-		{
-			if (Bps < s_BurstThreshold)
-			{
-				WindowInBurst = false;
-				double dT = PP->TS - WindowBurstStartTS;
-
-				if (
-					(dT > s_BurstDuration) &&
-					(WindowBurstBytes > 128*1024)
-				){
-					double BpsMean = WindowBurstBpsSum1	 / WindowBurstBpsSum0;
-					s64 dByte = WindowBurstBytes; 
-
-					double PacketSizeMean = WindowBurstBytes  / WindowBurstBpsSum0;	
-
-					printf("%s : Burst [Peek %10.3fGbps Mean: %10.3fGbps] Duration: %12.6f ms PacketCnt: %12lli MeanPktLen: %4.f B TotalBurstLen:%8lli KB \n", 
-							FormatTS(WindowBurstStartTS), 
-							WindowBurstBpsMax/1e9, 
-							BpsMean/1e9, 
-							dT / 1e6,
-							WindowBurstBpsSum0,
-							PacketSizeMean,
-							WindowBurstBytes / 1024
-						);
-				}
-			}
-			else
-			{
-				WindowBurstBpsMax	= (WindowBurstBpsMax < Bps) ? Bps : WindowBurstBpsMax;
-
-				WindowBurstBpsSum0	+= 1;
-				WindowBurstBpsSum1	+= Bps;
-				WindowBurstBpsSum2	+= Bps*Bps;
-
-				WindowBurstBytes	+= PP->Length;	
-			}
-		}
-		PktCnt++;
-		
-		if (PktCnt % (u64)100e6 == 0)
-		{
-			if (s_EnableStatus)
-			{
-				s64 PktCnt = PacketRingPut - PacketRingGet;
-				fprintf(stderr, "%s : Stats %30s\n", FormatTS(TS), PCAPFile->Path);
-			}
-		}
 	}
 }
 
